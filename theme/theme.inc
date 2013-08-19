@@ -40,11 +40,20 @@ function theme_islandora_compound_prev_next($variables) {
       else {
         $active = array();
       }
-
+      $sibling_object = islandora_object_load($sibling);
+      if (isset($sibling_object['TN']) && islandora_datastream_access(ISLANDORA_VIEW_OBJECTS, $sibling_object['TN'])) {
+        $path = 'islandora/object/' . $sibling . '/datastream/TN/view';
+      }
+      else {
+        // Object either does not have a thumbnail or it's restricted show a
+        // default in its place.
+        $image_path = drupal_get_path('module', 'islandora');
+        $path = "$image_path/images/folder.png";
+      }
       $output .= l(
         theme_image(
           array(
-            'path' => 'islandora/object/' . $sibling . '/datastream/TN/view',
+            'path' => $path,
             'attributes' => array(),
           )
         ),
@@ -57,5 +66,35 @@ function theme_islandora_compound_prev_next($variables) {
 
   $output .= '</div>';
 
+  return $output;
+}
+
+/**
+ * Implements theme_element().
+ */
+function theme_islandora_compound_object_draggable_table(array $variables) {
+  $form = $variables['form'];
+  $rows = array();
+  $weight_class = 'islandora-page-weight';
+  $table = &$form['table'];
+  foreach (element_children($table['rows']) as $id) {
+    $row = &$table['rows'][$id];
+    $row['weight']['#attributes'] = array('class' => array($weight_class));
+    $rows[] = array(
+      'data' => array(
+        drupal_render($row['label']),
+        drupal_render($row['pid']),
+        drupal_render($row['weight']),
+      ),
+      'class' => array('draggable'),
+    );
+  }
+  $table_id = 'islandora-reorder-objects-table';
+  $output = theme('table', array(
+              'header' => $table['#header'],
+              'rows' => $rows,
+              'attributes' => array('id' => $table_id)));
+  $output .= drupal_render_children($form);
+  drupal_add_tabledrag($table_id, 'order', 'sibling', $weight_class);
   return $output;
 }

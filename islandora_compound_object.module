@@ -70,6 +70,10 @@ function islandora_compound_object_theme($existing, $type, $theme, $path) {
         'pid' => NULL,
       ),
     ),
+    'islandora_compound_object_draggable_table' => array(
+      'render element' => 'form',
+      'file' => 'theme/theme.inc',
+    ),
   );
 }
 
@@ -80,7 +84,7 @@ function islandora_compound_object_block_info() {
   $blocks['compound_navigation'] = array(
     'info' => t('Islandora Compound Object Navigation'),
     'visibility' => BLOCK_VISIBILITY_LISTED,
-    'pages' => 'islandora/object/*'
+    'pages' => 'islandora/object/*',
   );
   return $blocks;
 }
@@ -180,57 +184,57 @@ function islandora_compound_object_navigation_block() {
   drupal_add_css(drupal_get_path('module', 'islandora_compound_object') . '/css/islandora_compound_object.block.css');
   if (arg(1) == 'object' && islandora_is_valid_pid(arg(2))) {
 
-    // If only compound cmodel objects can be compound, this isn't necessary
+    // If only compound cmodel objects can be compound, this isn't necessary.
     $children = islandora_compound_object_get_parts(arg(2));
     $pid = (!empty($children)) ? $children[0] : arg(2);
     $object = islandora_object_load($pid);
 
     $output = '';
+    if ($object) {
+      $rels_predicate = variable_get('islandora_compound_object_relationship', 'isPartOf');
+      $part_of = $object->relationships->get('info:fedora/fedora-system:def/relations-external#', $rels_predicate);
 
-    $rels_predicate = variable_get('islandora_compound_object_relationship', 'isPartOf');
-    $part_of = $object->relationships->get('info:fedora/fedora-system:def/relations-external#', $rels_predicate);
+      // This object is part of a compound object.
+      if (!empty($part_of)) {
+        // Go through all parents.
+        foreach ($part_of as $part) {
+          $parent_pid = $part['object']['value'];
+          $parent = islandora_object_load($parent_pid);
 
-    // This object is part of a compound object
-    if (!empty($part_of)) {
-      // Go through all parents
-      foreach ($part_of AS $part) {
-        $parent_pid = $part['object']['value'];
-        $parent = islandora_object_load($parent_pid);
+          $siblings = islandora_compound_object_get_parts($parent_pid);
+          $current_key = array_search($object->id, $siblings);
 
-        $siblings = islandora_compound_object_get_parts($parent_pid);
-        $current_key = array_search($object->id, $siblings);
+          $previous_pid = (isset($siblings[$current_key - 1])) ? $siblings[$current_key - 1] : '';
+          $next_pid = (isset($siblings[$current_key + 1])) ? $siblings[$current_key + 1] : '';
 
-        $previous_pid = (isset($siblings[$current_key - 1])) ? $siblings[$current_key - 1] : '';
-        $next_pid = (isset($siblings[$current_key + 1])) ? $siblings[$current_key + 1] : '';
+          // Check if perms to show link for parent manage.
+          if (islandora_object_manage_access_callback(array(
+            ISLANDORA_METADATA_EDIT, ISLANDORA_MANAGE_PROPERTIES, ISLANDORA_ADD_DS), $parent)) {
+            $parent_url = 'islandora/object/' . $parent_pid . '/manage';
+          }
+          else {
+            $parent_url = FALSE;
+          }
 
-        // Check if perms to show link for parent manage
-        if (islandora_object_manage_access_callback(array(
-          FEDORA_MANAGE_DATASTREAMS, FEDORA_MANAGE_PROPERTIES, FEDORA_ADD_DS), $parent)) {
-          $parent_url = 'islandora/object/' . $parent_pid . '/manage';
+          $prev_next = theme('islandora_compound_prev_next',
+            array(
+              'parent_label' => $parent->label,
+              'parent_url' => $parent_url,
+              'previous_pid' => $previous_pid,
+              'next_pid' => $next_pid,
+              'child_count' => count($siblings),
+              'siblings' => $siblings,
+              'pid' => $pid,
+            ));
+
+          $output .= $prev_next;
         }
-        else {
-          $parent_url = FALSE;
-        }
+      }
 
-        $prev_next = theme('islandora_compound_prev_next',
-          array(
-            'parent_label' => $parent->label,
-            'parent_url' => $parent_url,
-            'previous_pid' => $previous_pid,
-            'next_pid' => $next_pid,
-            'child_count' => count($siblings),
-            'siblings' => $siblings,
-            'pid' => $pid,
-          ));
-
-        $output .= $prev_next;
+      if (!empty($output)) {
+        return array('#markup' => $output);
       }
     }
-
-    if (!empty($output)) {
-      return array('#markup' => $output);
-    }
-
   }
 }
 
@@ -238,22 +242,22 @@ function islandora_compound_object_navigation_block() {
  * Implements hook_islandora_cmodel_islandora_view_object().
  */
 function islandora_compound_object_islandora_compoundCModel_islandora_view_object($object) {
-  // Get view of first child
+  // Get view of first child.
   $children = islandora_compound_object_get_parts($object->id);
   if (!empty($children)) {
-    $first_child = islandora_object_load($children[0]);
-    return islandora_view_object($first_child);
+    $first_child_id = reset($children);
+    if ($first_child_id != $object->id) {
+      $first_child = islandora_object_load($first_child_id);
+      return islandora_view_object($first_child);
+    }
   }
 }
 
 /**
  * Access callback for compound object management.
  */
-function islandora_compound_object_access(FedoraObject $object) {
-  if (!isset($object)) {
-    return FALSE;
-  }
-  return user_access('administer compound relationships');
+function islandora_compound_object_access(AbstractObject $object) {
+  return islandora_object_access('administer compound relationships', $object);
 }
 
 /**
@@ -292,8 +296,8 @@ function islandora_compound_object_autocomplete_child($string) {
   $islandora_tuque = new IslandoraTuque();
   $results = $islandora_tuque->api->a->findObjects('terms', '*' . $string . '*', 10);
 
-  foreach ($results['results'] AS $result) {
-    // Empty array elements getting sent through
+  foreach ($results['results'] as $result) {
+    // Empty array elements getting sent through.
     if (is_array($result['title'])) {
       $title = $result['title'][0];
     }
@@ -313,22 +317,55 @@ function islandora_compound_object_get_parts($pid, $ret_title = FALSE) {
   $objects = array();
 
   $connection = islandora_get_tuque_connection();
-
+  $escaped_pid = str_replace(':', '_', $pid);
   if ($connection) {
-    $query = 'select $object $title from <#ri>
-              where $object <dc:title> $title 
-              and $object <info:fedora/fedora-system:def/relations-external#' . $rels_predicate . '> <info:fedora/' . $pid . '>
-              order by $object';
-    $results = $connection->repository->ri->itqlQuery($query);
+    $query = <<<EOQ
+PREFIX islandora-rels-ext: <http://islandora.ca/ontology/relsext#>
+SELECT ?object ?title ?seq
+FROM <#ri>
+WHERE {
+  ?object <fedora-model:label> ?title ;
+          <fedora-rels-ext:$rels_predicate> <info:fedora/$pid> .
+  OPTIONAL {
+    ?object islandora-rels-ext:isSequenceNumberOf$escaped_pid ?seq
+  }
+}
+EOQ;
+    $results = $connection->repository->ri->sparqlQuery($query);
 
-    foreach ($results AS $result) {
-      if ($ret_title) {
-        $objects[$result['object']['value']] = array('pid' => $result['object']['value'], 'title' => $result['title']['value']);
+    // Sort the objects into their proper order.
+    $sort = function($a, $b) {
+      $a = $a['seq']['value'];
+      $b = $b['seq']['value'];
+      if ($a === $b) {
+        return 0;
       }
-      else {
-        $objects[] = $result['object']['value'];
+      if (empty($a)) {
+        return 1;
+      }
+      if (empty($b)) {
+        return -1;
+      }
+      return $a - $b;
+    };
+    uasort($results, $sort);
+
+    foreach ($results as $result) {
+      $object = islandora_object_load($result['object']['value']);
+      if (islandora_object_access(ISLANDORA_VIEW_OBJECTS, $object)) {
+        if ($ret_title) {
+          $objects[$result['object']['value']] = array(
+            'pid' => $result['object']['value'],
+            'title' => $result['title']['value'],
+            'seq' => $result['seq']['value'],
+          );
+        }
+        else {
+          $objects[] = $result['object']['value'];
+        }
       }
     }
   }
+
   return $objects;
 }
